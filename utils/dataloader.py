@@ -1,4 +1,198 @@
 import torch
+from torch.utils.data import Dataset
+from PIL import Image
+import numpy as np
+import cv2
+import os
+import glob
+import random
+
+# ---------------------- 辅助函数 ----------------------
+def cvtColor(image):
+    if len(np.shape(image)) == 3 and np.shape(image)[2] == 3:
+        return image
+    else:
+        image = image.convert('RGB')
+        return image
+
+def preprocess_input(image):
+    image = image / 255.0
+    image -= np.array([0.485, 0.456, 0.406])
+    image /= np.array([0.229, 0.224, 0.225])
+    return image
+
+# ---------------------- 图像增强类 ----------------------
+class Resize(object):
+    def __init__(self, size, interpolation=Image.BICUBIC):
+        self.size = size
+        self.interpolation = interpolation
+
+    def __call__(self, img):
+        return img.resize(self.size, self.interpolation)
+
+class CenterCrop(object):
+    def __init__(self, size):
+        self.size = size
+
+    def __call__(self, img):
+        w, h = img.size
+        th, tw = self.size
+        x1 = int(round((w - tw) / 2.))
+        y1 = int(round((h - th) / 2.))
+        return img.crop((x1, y1, x1 + tw, y1 + th))
+
+class RandomResizedCrop(object):
+    def __init__(self, size, scale=(0.08, 1.0), ratio=(3./4., 4./3.), interpolation=Image.BICUBIC):
+        self.size = size
+        self.interpolation = interpolation
+        self.scale = scale
+        self.ratio = ratio
+
+    def __call__(self, img):
+        # 简单实现，直接 resize 到目标尺寸
+        return img.resize(self.size, self.interpolation)
+
+class ImageNetPolicy(object):
+    def __init__(self):
+        pass
+    def __call__(self, img):
+        return img  # 占位
+
+# ---------------------- 数据集 ----------------------
+class MultiTaskDataset(Dataset):
+    def __init__(self, data_dir, input_shape, num_classes, random_flag=True, autoaugment_flag=True):
+        super().__init__()
+        self.input_shape = input_shape
+        self.random = random_flag
+        self.num_classes = num_classes
+        self.background_class_id = num_classes
+
+        # 加载文件
+        cc_pos_files = glob.glob(os.path.join(data_dir, 'cc', 'positive', '*.jpg'))
+        mlo_pos_files = glob.glob(os.path.join(data_dir, 'mlo', 'positive', '*.jpg'))
+        self.cc_neg_files = glob.glob(os.path.join(data_dir, 'cc', 'negative', '*.jpg'))
+        self.mlo_neg_files = glob.glob(os.path.join(data_dir, 'mlo', 'negative', '*.jpg'))
+
+        # 解析正样本匹配
+        self.positive_pairs = []
+        self.all_positive_cc_map = {}
+        self.all_positive_mlo_map = {}
+
+        cc_pos_map = {}
+        for f_cc in cc_pos_files:
+            key, class_id = self._parse_positive_filename(os.path.basename(f_cc))
+            cc_pos_map[key] = {"path": f_cc, "class": class_id}
+            self.all_positive_cc_map[f_cc] = class_id
+
+        for f_mlo in mlo_pos_files:
+            key, class_id = self._parse_positive_filename(os.path.basename(f_mlo))
+            self.all_positive_mlo_map[f_mlo] = class_id
+            if key in cc_pos_map:
+                cc_match = cc_pos_map[key]
+                self.positive_pairs.append({
+                    "cc_path": cc_match["path"],
+                    "cc_class": cc_match["class"],
+                    "mlo_path": f_mlo,
+                    "mlo_class": class_id
+                })
+
+        self.all_positive_cc_list = list(self.all_positive_cc_map.keys())
+        self.all_positive_mlo_list = list(self.all_positive_mlo_map.keys())
+
+        # 数据增强
+        self.autoaugment_flag = autoaugment_flag
+        self.resize_crop = RandomResizedCrop(input_shape)
+        self.policy = ImageNetPolicy()
+        self.resize = Resize(input_shape)
+        self.center_crop = CenterCrop(input_shape)
+
+    def _parse_positive_filename(self, filename):
+        name_no_ext = os.path.splitext(filename)[0]
+        parts = name_no_ext.split('_class')
+        class_id = int(parts[-1])
+        key_part = parts[0]
+        key_parts = key_part.split('_')
+        patient_id = key_parts[0]
+        side = key_parts[1]
+        gt_index = "_".join(key_parts[3:])
+        key = f"{patient_id}_{side}_{gt_index}"
+        return key, class_id
+
+    def __len__(self):
+        return len(self.positive_pairs) + len(self.cc_neg_files) + len(self.mlo_neg_files)
+
+    def __getitem__(self, index):
+        if index < len(self.positive_pairs) and random.random() < 0.5:
+            pair_info = self.positive_pairs[index % len(self.positive_pairs)]
+            patch_cc_path = pair_info["cc_path"]
+            patch_mlo_path = pair_info["mlo_path"]
+            label_cls_cc = pair_info["cc_class"]
+            label_cls_mlo = pair_info["mlo_class"]
+            label_match = 1.0
+        else:
+            label_match = 0.0
+            rand_type = random.random()
+            if rand_type < 0.33:
+                patch_cc_path = random.choice(self.all_positive_cc_list)
+                patch_mlo_path = random.choice(self.mlo_neg_files)
+                label_cls_cc = self.all_positive_cc_map[patch_cc_path]
+                label_cls_mlo = self.background_class_id
+            elif rand_type < 0.66:
+                patch_cc_path = random.choice(self.cc_neg_files)
+                patch_mlo_path = random.choice(self.all_positive_mlo_list)
+                label_cls_cc = self.background_class_id
+                label_cls_mlo = self.all_positive_mlo_map[patch_mlo_path]
+            else:
+                patch_cc_path = random.choice(self.cc_neg_files)
+                patch_mlo_path = random.choice(self.mlo_neg_files)
+                label_cls_cc = self.background_class_id
+                label_cls_mlo = self.background_class_id
+
+        image_cc = Image.open(patch_cc_path)
+        image_cc = cvtColor(image_cc)
+        image_cc = self.apply_augment(image_cc)
+
+        image_mlo = Image.open(patch_mlo_path)
+        image_mlo = cvtColor(image_mlo)
+        image_mlo = self.apply_augment(image_mlo)
+
+        image_cc = preprocess_input(np.array(image_cc).astype(np.float32))
+        image_cc = np.transpose(image_cc, [2,0,1])
+
+        image_mlo = preprocess_input(np.array(image_mlo).astype(np.float32))
+        image_mlo = np.transpose(image_mlo, [2,0,1])
+
+        return (
+            torch.from_numpy(image_cc).float(),
+            torch.from_numpy(image_mlo).float(),
+            torch.tensor(label_cls_cc, dtype=torch.long),
+            torch.tensor(label_cls_mlo, dtype=torch.long),
+            torch.tensor(label_match, dtype=torch.float32)
+        )
+
+    def apply_augment(self, image):
+        if not self.random or not self.autoaugment_flag:
+            image = self.resize(image)
+            image = self.center_crop(image)
+            return image
+        image = self.resize_crop(image)
+        if random.random() < 0.5:
+            image = image.transpose(Image.FLIP_LEFT_RIGHT)
+        image = self.policy(image)
+        return image
+
+# ---------------------- Collate Function ----------------------
+def multitask_collate(batch):
+    images_cc = torch.stack([item[0] for item in batch], dim=0)
+    images_mlo = torch.stack([item[1] for item in batch], dim=0)
+    labels_cls_cc = torch.stack([item[2] for item in batch], dim=0)
+    labels_cls_mlo = torch.stack([item[3] for item in batch], dim=0)
+    labels_match = torch.stack([item[4] for item in batch], dim=0).unsqueeze(1)
+    return (images_cc, images_mlo), (labels_cls_cc, labels_cls_mlo, labels_match)
+
+
+'''
+import torch
 from torch.utils.data.dataset import Dataset
 from PIL import Image
 import numpy as np
@@ -349,3 +543,4 @@ def multitask_collate(batch):
     # inputs 是一个 (cc_batch, mlo_batch) 的元组
     # labels 是一个 (cc_labels, mlo_labels, match_labels) 的元组
     return (images_cc, images_mlo), (labels_cls_cc, labels_cls_mlo, labels_match)
+'''
