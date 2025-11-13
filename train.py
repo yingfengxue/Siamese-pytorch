@@ -302,7 +302,7 @@ if __name__ == "__main__":
                     pbar.set_postfix(**{'total_loss'    : total_loss / (i + 1), 
                                         'cls_loss'      : total_cls_loss / (i + 1),
                                         'match_loss'    : total_match_loss / (i + 1),
-                                        'lr'            : get_lr_scheduler.get_lr(optimizer)})
+                                        'lr'            : optimizer.param_groups[0]['lr']})
                     pbar.update(1)
             
             if local_rank == 0:
@@ -347,7 +347,7 @@ if __name__ == "__main__":
                     pbar.set_postfix(**{'val_loss'      : val_loss / (i + 1),
                                         'val_cls'       : val_cls_loss / (i + 1),
                                         'val_match'     : val_match_loss / (i + 1),
-                                        'lr'            : get_lr_scheduler.get_lr(optimizer)})
+                                        'lr'            : optimizer.param_groups[0]['lr']})
                     pbar.update(1)
             
             # --- 记录和保存 ---
