@@ -152,28 +152,42 @@ class FullDetectionPipeline:
 # ---------------------------
 # 评估函数 (包含 mAP50 & mAP@[0.5:0.95])
 # ---------------------------
+from mean_average_precision import MetricBuilder
+import numpy as np
+import os
+
 def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
     preds_list = []
     gt_list = []
     total_tp = total_fp = total_fn = 0
+
+    # 给每个 match_key 分配唯一整数 ID (map_2d 要求 image_id)
+    match_key2id = {k: idx for idx, k in enumerate(final_predictions.keys())}
 
     for match_key, data in final_predictions.items():
         pred_class = data['predicted_class']
         pred_box = data['predicted_box_coords']
         cc_prop = data['final_cc_proposal']
 
-        # GT
+        image_id = match_key2id[match_key]
+
+        # ------------------
+        # Ground Truth
+        # ------------------
         gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', match_key + '_CC.txt')
         gt_boxes = load_boxes_from_file(gt_path)
         for gt in gt_boxes:
             x1, y1, x2, y2 = yolo_to_norm_corners(gt)
-            gt_list.append([gt[0], x1, y1, x2, y2])   # <- shape (5,)
+            difficult = 0  # 默认非难例
+            gt_list.append([image_id, gt[0], x1, y1, x2, y2, difficult])
 
+        # ------------------
         # 预测
+        # ------------------
         if cc_prop is not None and pred_class < 3 and pred_box is not None:
             x1, y1, x2, y2 = yolo_to_norm_corners(pred_box)
             score = data.get('best_score', 1.0)
-            preds_list.append([pred_class, x1, y1, x2, y2, score])  # <- shape (6,)
+            preds_list.append([image_id, pred_class, x1, y1, x2, y2, score])
 
             # TP/FP/FN 统计
             is_tp = any(calculate_iou([x1, y1, x2, y2], yolo_to_norm_corners(gt)) >= 0.5 for gt in gt_boxes)
@@ -184,14 +198,16 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
         else:
             total_fn += len(gt_boxes)
 
+    # ------------------
     # Precision / Recall / F1
+    # ------------------
     precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) else 0
     recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) else 0
     f1_score = 2*precision*recall/(precision+recall) if (precision+recall) else 0
 
-    # -------------------
+    # ------------------
     # mAP 计算
-    # -------------------
+    # ------------------
     preds = np.array(preds_list, dtype=np.float32)
     gts = np.array(gt_list, dtype=np.float32)
 
@@ -210,6 +226,7 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
         'mAP50': res50['mAP'],
         'mAP@[0.5:0.95]': res_all['mAP']
     }
+
 
 
 # ---------------------------
