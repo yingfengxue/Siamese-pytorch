@@ -149,7 +149,7 @@ class FullDetectionPipeline:
         
         return results
 
-idef calculate_ap(tp_sum, fp_sum, num_gt):
+def calculate_ap(tp_sum, fp_sum, num_gt):
     """
     计算单个类别的 Average Precision (AP)。
     简化实现：基于 11 个插值点或所有点的面积。
