@@ -259,4 +259,5 @@ def dataset_collate(batch):
             
     images = torch.from_numpy(np.array([left_images, right_images])).type(torch.FloatTensor)
     labels = torch.from_numpy(np.array(labels)).type(torch.FloatTensor)
+
     return images, labels
