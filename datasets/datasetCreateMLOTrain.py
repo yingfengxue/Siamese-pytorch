@@ -8,7 +8,7 @@ import glob
 VIEW = 'mlo'      
 SPLIT = 'train'
 # --- 调整K值 (每张图像保留的阴性样本数) ---
-K_NEGATIVE_PATCHES = 5 
+K_NEGATIVE_PATCHES = 3 
 IOU_THRESHOLD = 0.5
 
 
