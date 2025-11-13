@@ -48,12 +48,12 @@ def calculate_iou(boxA, boxB):
 
 # --- 配置 ---
 BEST_MODEL_PATH = '/kaggle/working/logs/ep020-loss1.689-val1.724.pth'
-TEST_PATCH_DIR = '/kaggle/input/siamesedata/siameseD/test'
+TEST_PATCH_DIR = '/kaggle/input/siamesedata/siameseD/val'
 GT_LABEL_DIR = '/kaggle/input/breast/data'
 YOLO_PRED_LABEL_DIR = '/kaggle/input/siamesedata/siameseD'
 INPUT_SHAPE = [224, 224]
 NUM_CLASSES = 4
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.01
 
 # ---------------------------
 # Full Detection Pipeline
