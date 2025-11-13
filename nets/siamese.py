@@ -31,12 +31,14 @@ class CMCNet(nn.Module):
         # --- C: 分类头 (Classification Head) ---
         # 这是一个共享的FC层，用于两个分支的分类任务
         # 输出 4 (3个 positive 类 + 1个 "背景" 类)
+        self.metric_dropout = nn.Dropout(p=0.5)
         self.classifier_head = nn.Linear(feature_dim, num_classes)
         
         # --- B: 度量网络 (Metric Network Head) ---
         # 这个头接收 *串联* 的特征 [f_cc, f_mlo]
         # 串联后的维度是 512 + 512 = 1024
         # 输出 2 (代表 "不匹配" 或 "匹配")
+        self.metric_dropout = nn.Dropout(p=0.5)
         self.metric_head = nn.Linear(feature_dim * 2, 2)
 
     def forward_once(self, x):
@@ -63,16 +65,19 @@ class CMCNet(nn.Module):
 
         # --- C: 分类输出 ---
         # 两个分支使用 *共享* 的分类头
-        out_cls_cc = self.classifier_head(f_cc)   # -> [B, 4]
-        out_cls_mlo = self.classifier_head(f_mlo) # -> [B, 4]
+        # out_cls_cc = self.classifier_head(f_cc)   # -> [B, 4]
+        # out_cls_mlo = self.classifier_head(f_mlo) # -> [B, 4]
+        out_cls_cc = self.classifier_head(self.classifier_dropout(f_cc))
+        out_cls_mlo = self.classifier_head(self.classifier_dropout(f_mlo))
         
         # --- B: 匹配输出 ---
         # 串联两个特征向量
         f_concat = torch.cat((f_cc, f_mlo), dim=1) # -> [B, 1024]
         
         # 通过度量网络头
-        out_match = self.metric_head(f_concat)    # -> [B, 2]
-
+        #out_match = self.metric_head(f_concat)    # -> [B, 2]
+        out_match = self.metric_head(self.metric_dropout(f_concat))
+        
         # --- 返回三个输出 ---
         # 我们还返回原始特征，以防您想在 train.py 中使用对比损失 (Contrastive Loss)
         return out_cls_cc, out_cls_mlo, out_match, f_cc, f_mlo
