@@ -53,7 +53,7 @@ GT_LABEL_DIR = '/kaggle/input/breast/data'
 YOLO_PRED_LABEL_DIR = '/kaggle/input/siamesedata/siameseD'
 INPUT_SHAPE = [224, 224]
 NUM_CLASSES = 4
-CONFIDENCE_THRESHOLD = 0.01
+CONFIDENCE_THRESHOLD = 0.001
 
 # ---------------------------
 # Full Detection Pipeline
@@ -152,7 +152,7 @@ class FullDetectionPipeline:
 # ---------------------------
 # 评估函数 (包含 mAP50 & mAP@[0.5:0.95])
 # ---------------------------
-def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.01):
+def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
     """
     评估函数：计算 TP/FP/FN/TN/Precision/Recall/F1/Accuracy。
     """
