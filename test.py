@@ -167,13 +167,13 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
         gt_boxes = load_boxes_from_file(gt_path)
         for gt in gt_boxes:
             x1, y1, x2, y2 = yolo_to_norm_corners(gt)
-            gt_list.append([match_key, gt[0], x1, y1, x2, y2])
+            gt_list.append([gt[0], x1, y1, x2, y2])   # <- shape (5,)
 
         # 预测
         if cc_prop is not None and pred_class < 3 and pred_box is not None:
             x1, y1, x2, y2 = yolo_to_norm_corners(pred_box)
             score = data.get('best_score', 1.0)
-            preds_list.append([match_key, pred_class, x1, y1, x2, y2, score])
+            preds_list.append([pred_class, x1, y1, x2, y2, score])  # <- shape (6,)
 
             # TP/FP/FN 统计
             is_tp = any(calculate_iou([x1, y1, x2, y2], yolo_to_norm_corners(gt)) >= 0.5 for gt in gt_boxes)
@@ -192,8 +192,8 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
     # -------------------
     # mAP 计算
     # -------------------
-    preds = np.array(preds_list)
-    gts = np.array(gt_list)
+    preds = np.array(preds_list, dtype=np.float32)
+    gts = np.array(gt_list, dtype=np.float32)
 
     metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=False, num_classes=num_classes)
     metric_fn.add(preds, gts)
@@ -210,6 +210,7 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
         'mAP50': res50['mAP'],
         'mAP@[0.5:0.95]': res_all['mAP']
     }
+
 
 # ---------------------------
 # 主函数
