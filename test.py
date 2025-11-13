@@ -39,7 +39,7 @@ def calculate_iou(boxA, boxB):
     return interArea / unionArea
 
 # --- 配置 ---
-BEST_MODEL_PATH = '/kaggle/input/30epoch/ep030-loss1.412-val1.829.pth'
+BEST_MODEL_PATH = '/kaggle/working/logs/ep020-loss1.689-val1.724.pth'
 TEST_PATCH_DIR = '/kaggle/input/siamesedata/siameseD/test'
 GT_LABEL_DIR = '/kaggle/input/breast/data'
 YOLO_PRED_LABEL_DIR = '/kaggle/input/siamesedata/siameseD'
