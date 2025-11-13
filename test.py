@@ -295,9 +295,17 @@ def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
         gt_boxes_data = load_boxes_from_file(cc_gt_path)
         has_ground_truth = len(gt_boxes_data) > 0
         
-        # 收集 GT 数据 (只收集一次)
+        # 收集 GT 数据 (修正：将列表格式转换为字典格式)
         if original_base_name not in all_gt_for_map:
-             all_gt_for_map[original_base_name] = gt_boxes_data
+            converted_gt_list = []
+            for gt_data_list in gt_boxes_data:
+                # 确保格式为 [class_id, xc, yc, w, h]
+                if len(gt_data_list) >= 5:
+                    converted_gt_list.append({
+                        'box': gt_data_list[1:5],  # 提取 [xc, yc, w, h] (索引 1 到 4)
+                        'class': int(gt_data_list[0])  # 提取 class_id (索引 0)
+                    })
+            all_gt_for_map[original_base_name] = converted_gt_list
              
         # 收集预测数据
         if is_mass_prediction and predicted_box_coords is not None:
