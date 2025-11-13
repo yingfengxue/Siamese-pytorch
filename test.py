@@ -235,7 +235,7 @@ def calculate_map(all_preds_for_map, all_gt_for_map, iou_thresholds):
 
 
 # --- 最终评估函数 (已修正) ---
-def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
+def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.01):
     total_tp = 0
     total_fp = 0
     total_fn = 0
