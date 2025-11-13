@@ -9,7 +9,7 @@ import math
 
 # --- 导入您的模型和工具 (请根据您系统的实际位置修改) ---
 from nets.siamese import CMCNet
-# from utils.utils import calculate_iou, yolo_to_pixel, load_boxes_from_file, cvtColor, preprocess_input
+from utils.utils import cvtColor, calculate_iou
 # (此处省略辅助函数导入，请确保它们可用)
 
 # --- 辅助函数占位符 (用于演示逻辑，请替换为您的实际函数) ---
@@ -34,11 +34,11 @@ def calculate_iou(box1, box2):
 # -------------------------------------------------------------
 
 # --- 配置 (Configuration) ---
-BEST_MODEL_PATH = 'logs/best_model.pth' 
+BEST_MODEL_PATH = '/kaggle/input/30epoch/ep030-loss1.412-val1.829.pth' 
 TEST_PATCH_DIR = '/kaggle/working/processed_data/test'   # 经过处理的测试集 patches 基础路径 (包含 positive/negative)
 GT_LABEL_DIR = '/kaggle/input/breast/data'              # 原始 GT 标签基础路径
 YOLO_PRED_LABEL_DIR = '/kaggle/input/siamesedata/siameseD' # 原始 YOLO 预测标签基础路径 (用于获取预测坐标)
-INPUT_SHAPE = [64, 64]
+INPUT_SHAPE = [224, 224]
 NUM_CLASSES = 4 # 3 Positive Classes + 1 Background Class (Class ID = 3)
 IOU_THRESHOLD = 0.5
 CONFIDENCE_THRESHOLD = 0.5 # CMCNet 预测非背景的最低置信度
