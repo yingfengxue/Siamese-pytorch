@@ -152,6 +152,7 @@ class FullDetectionPipeline:
 # ---------------------------
 # 评估函数 (包含 mAP50 & mAP@[0.5:0.95])
 # ---------------------------
+'''
 def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
     """
     评估函数：计算 TP/FP/FN/TN/Precision/Recall/F1/Accuracy。
@@ -240,6 +241,120 @@ def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
         'Total_Samples': total_samples,
         'Precision': precision, 'Recall': recall, 'F1_Score': f1_score,
         'Accuracy': accuracy # <-- 新增 Accuracy
+    }
+
+'''
+def evaluate_results(final_predictions, gt_base_dir, num_classes=4, iou_threshold=0.5):
+    """
+    评估函数：计算 TP/FP/FN/TN/Precision/Recall/F1/Accuracy，同时计算 mAP50 & mAP@[0.5:0.95]。
+    
+    参数:
+        final_predictions: dict, CMCNet 推理结果
+        gt_base_dir: str, GT 文件夹路径
+        num_classes: int, 正样本类别数 + 背景
+        iou_threshold: float, IoU 判定 TP 的阈值
+    
+    返回:
+        dict: 包含所有指标
+    """
+    import numpy as np
+    from mean_average_precision import MetricBuilder
+    
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+    total_tn = 0
+
+    preds_list = []
+    gts_list = []
+
+    for match_key, pred_data in final_predictions.items():
+        predicted_box = pred_data.get('predicted_box_coords')
+        predicted_class = pred_data.get('predicted_class', -1)
+        cc_prop_info = pred_data.get('final_cc_proposal')
+        best_score = pred_data.get('best_score', 0.0)
+        is_mass_pred = (predicted_class >= 0) and (predicted_class < num_classes-1)
+
+        # --- 构造 GT 文件路径 ---
+        if cc_prop_info is not None:
+            base_name = "_".join(cc_prop_info['filename'].split('_')[:3])
+        else:
+            base_name = match_key + '_CC'
+
+        gt_file = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', base_name + '.txt')
+        gt_boxes = load_boxes_from_file(gt_file)
+        has_gt = len(gt_boxes) > 0
+
+        # --- TP / FP / FN / TN ---
+        is_true_positive = False
+        if is_mass_pred and predicted_box is not None and has_gt:
+            pred_box_norm = yolo_to_norm_corners(predicted_box)
+            for gt in gt_boxes:
+                gt_box_norm = yolo_to_norm_corners(gt)
+                if calculate_iou(pred_box_norm, gt_box_norm) >= iou_threshold:
+                    is_true_positive = True
+                    break
+
+        # 统计
+        if is_mass_pred:
+            if is_true_positive:
+                total_tp += 1
+            else:
+                total_fp += 1
+        if has_gt and not is_true_positive:
+            total_fn += len(gt_boxes)
+        if not is_mass_pred and not has_gt:
+            total_tn += 1
+
+        # --- 构造 preds_list 和 gts_list，用于 mAP ---
+        # Preds: [x1, y1, x2, y2, confidence, class_id]
+        if is_mass_pred and predicted_box is not None:
+            x1, y1, x2, y2 = yolo_to_norm_corners(predicted_box)
+            preds_list.append([x1, y1, x2, y2, float(best_score), float(predicted_class)])
+        
+        # GTs: [x1, y1, x2, y2, class_id, difficult]
+        for gt in gt_boxes:
+            x1, y1, x2, y2 = yolo_to_norm_corners(gt)
+            class_id = int(gt[0])
+            difficult = 0
+            gts_list.append([x1, y1, x2, y2, class_id, difficult])
+
+    # --- Precision / Recall / F1 / Accuracy ---
+    total_detections = total_tp + total_fp
+    total_ground_truth = total_tp + total_fn
+    total_samples = total_tp + total_fp + total_fn + total_tn
+
+    precision = total_tp / total_detections if total_detections > 0 else 0
+    recall = total_tp / total_ground_truth if total_ground_truth > 0 else 0
+    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    accuracy = (total_tp + total_tn) / total_samples if total_samples > 0 else 0
+
+    # --- mAP 计算 ---
+    try:
+        preds_array = np.array(preds_list, dtype=np.float32)
+        gts_array = np.array(gts_list, dtype=np.float32)
+        metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=False, num_classes=num_classes-1)
+        if len(preds_array) > 0 and len(gts_array) > 0:
+            metric_fn.add(preds_array, gts_array)
+            res_all = metric_fn.value(iou_thresholds=np.arange(0.5, 1.0, 0.05))
+            res50 = metric_fn.value(iou_thresholds=[0.5])
+            mAP50 = res50['mAP']
+            mAP_all = res_all['mAP']
+        else:
+            mAP50 = 0.0
+            mAP_all = 0.0
+    except Exception as e:
+        print("mAP 计算失败:", e)
+        mAP50 = 0.0
+        mAP_all = 0.0
+
+    return {
+        'TP': total_tp, 'FP': total_fp, 'FN': total_fn, 'TN': total_tn,
+        'Total_Samples': total_samples,
+        'Precision': precision, 'Recall': recall, 'F1_Score': f1_score,
+        'Accuracy': accuracy,
+        'mAP50': mAP50,
+        'mAP@[0.5:0.95]': mAP_all
     }
 
 
