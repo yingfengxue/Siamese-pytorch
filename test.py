@@ -48,7 +48,7 @@ def calculate_iou(boxA, boxB):
 
 # --- 配置 ---
 BEST_MODEL_PATH = '/kaggle/working/logs/ep020-loss1.689-val1.724.pth'
-TEST_PATCH_DIR = '/kaggle/input/siamesedata/siameseD/val'
+TEST_PATCH_DIR = '/kaggle/input/siamesedata/siameseD/test'
 GT_LABEL_DIR = '/kaggle/input/breast/data'
 YOLO_PRED_LABEL_DIR = '/kaggle/input/siamesedata/siameseD'
 INPUT_SHAPE = [224, 224]
