@@ -128,13 +128,21 @@ class MultiTaskDataset(Dataset):
         print(f"Found {len(self.mlo_neg_files)} MLO negative patches.")
 
         # 3. 设置数据增强 (重用您代码中的逻辑)
+        # 3. 设置数据增强
         self.autoaugment_flag = autoaugment_flag
-        if self.autoaugment_flag:
-            self.resize_crop = RandomResizedCrop(input_shape)
-            self.policy = ImageNetPolicy()
-        else:
-            self.resize = Resize(input_shape[0] if input_shape[0] == input_shape[1] else input_shape)
-            self.center_crop = CenterCrop(input_shape)
+        
+        # --- (!! 关键修复 !!) ---
+        # 无论 autoaugment_flag 是什么，我们都需要为 random=True (训练) 和 random=False (验证) 
+        # 两种情况初始化 *所有* 需要的变换。
+        
+        # (1) 用于 autoaugment (random=True)
+        self.resize_crop = RandomResizedCrop(input_shape)
+        self.policy = ImageNetPolicy()
+        
+        # (2) 用于 validation (random=False)
+        # (这在 autoaugment_flag=True 时被错误地跳过了)
+        self.resize = Resize(input_shape[0] if input_shape[0] == input_shape[1] else input_shape)
+        self.center_crop = CenterCrop(input_shape)
 
     def _parse_positive_filename(self, filename):
         """
