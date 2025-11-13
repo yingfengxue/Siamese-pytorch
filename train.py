@@ -109,8 +109,8 @@ if __name__ == "__main__":
             model_train = model_train.cuda()
 
     # ---------------------- 数据集 ----------------------
-    train_dataset = MultiTaskDataset(train_data_path, input_shape, num_classes=num_positive_classes, random=True)
-    val_dataset   = MultiTaskDataset(val_data_path, input_shape, num_classes=num_positive_classes, random=False)
+    train_dataset = MultiTaskDataset(train_data_path, input_shape, num_classes=num_positive_classes)
+    val_dataset   = MultiTaskDataset(val_data_path, input_shape, num_classes=num_positive_classes)
 
     num_train = len(train_dataset)
     num_val   = len(val_dataset)
