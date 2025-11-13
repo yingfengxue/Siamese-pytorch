@@ -88,6 +88,17 @@ def main():
     print(f"视图 (VIEW): {VIEW}")
     print(f"数据 (SPLIT): {SPLIT}")
     
+    # 检查输入路径
+    if not os.path.isdir(FULL_IMAGE_DIR):
+        print(f"*** 错误: 图像路径不存在: {FULL_IMAGE_DIR}")
+        return
+    if not os.path.isdir(GT_LABEL_DIR):
+        print(f"*** 错误: GT标签路径不存在: {GT_LABEL_DIR}")
+        return
+    if not os.path.isdir(YOLO_PRED_LABEL_DIR):
+        print(f"*** 错误: YOLO预测标签路径不存在: {YOLO_PRED_LABEL_DIR}")
+        return
+
     # 确保输出目录存在
     os.makedirs(POSITIVE_PATCH_DIR, exist_ok=True)
     os.makedirs(NEGATIVE_PATCH_DIR, exist_ok=True)
@@ -96,13 +107,12 @@ def main():
 
     print(f"\n正在读取全尺寸图像: {FULL_IMAGE_DIR}")
     
-    # 查找所有支持的图像格式
     image_files = []
     for ext in ('*.jpg', '*.png', '*.jpeg'):
         image_files.extend(glob.glob(os.path.join(FULL_IMAGE_DIR, ext)))
 
     if not image_files:
-        print(f"*** 错误: 在 {FULL_IMAGE_DIR} 中未找到任何图像文件。请检查路径。")
+        print(f"*** 警告: 在 {FULL_IMAGE_DIR} 中未找到任何图像文件。")
         return
 
     print(f"共找到 {len(image_files)} 张图像。")
@@ -114,7 +124,6 @@ def main():
         img_filename = os.path.basename(img_path)
         base_filename = os.path.splitext(img_filename)[0]
         
-        # 1. 加载图像
         img = cv2.imread(img_path)
         if img is None:
             print(f"警告: 无法读取图像 {img_path}, 跳过。")
@@ -122,20 +131,35 @@ def main():
         
         img_height, img_width = img.shape[:2]
 
-        # 2. 加载Ground Truth (GT) 和 YOLO预测 
+        # --- 任务 A: 加载阳性 Patches (来自 Ground Truth) ---
         gt_label_path = os.path.join(GT_LABEL_DIR, base_filename + '.txt')
-        yolo_label_path = os.path.join(YOLO_PRED_LABEL_DIR, base_filename + '.txt')
-
         gt_boxes_data = load_boxes_from_file(gt_label_path)
-        yolo_boxes_data = load_boxes_from_file(yolo_label_path)
 
-        # 将GT boxes转换为pixel格式
         gt_pixel_boxes = []
         for gt_data in gt_boxes_data:
             gt_pixel_boxes.append(yolo_to_pixel(gt_data["box_yolo"], img_width, img_height))
 
-        # --- 任务 A: 提取阳性 Patches (来自 Ground Truth) ---
+        # --- (!! 关键修复 !!) ---
+        # --- 任务 B: 加载阴性 Patches (来自 YOLO 假阳性) ---
         
+        # 查找所有匹配的YOLO预测文件 (e.g., ..._0.txt, ..._1.txt)
+        yolo_label_pattern = os.path.join(YOLO_PRED_LABEL_DIR, base_filename + "_*.txt")
+        yolo_label_files = glob.glob(yolo_label_pattern)
+        
+        yolo_boxes_data = [] # 初始化一个空列表
+        
+        if not yolo_label_files:
+            # 这是一个新加的警告，如果找不到任何YOLO预测文件
+            pass # 我们可以跳过警告，因为这可能是正常的
+            # print(f"警告: [阴性] 未找到 {base_filename} 对应的YOLO预测文件 (模式: {yolo_label_pattern})")
+
+        # 循环读取所有找到的YOLO预测文件
+        for yolo_file in yolo_label_files:
+            yolo_boxes_data.extend(load_boxes_from_file(yolo_file))
+        
+        # --- (修复结束) ---
+
+        # --- 任务 A: 提取阳性 Patches (来自 Ground Truth) ---
         for i, gt_data in enumerate(gt_boxes_data):
             x1, y1, x2, y2 = yolo_to_pixel(gt_data["box_yolo"], img_width, img_height)
             patch = img[y1:y2, x1:x2]
@@ -151,14 +175,14 @@ def main():
             total_pos_patches += 1
 
         # --- 任务 B: 提取阴性 Patches (来自 YOLO 假阳性) ---
+        false_positives = [] 
         
-        false_positives = [] # (confidence, pixel_box)
-
+        # (现在 yolo_boxes_data 包含了所有 ..._0.txt, ..._1.txt 等文件中的内容)
         for yolo_data in yolo_boxes_data:
             yolo_pixel_box = yolo_to_pixel(yolo_data["box_yolo"], img_width, img_height)
             
             max_iou = 0.0
-            if not gt_pixel_boxes: # 如果没有GT box，所有预测都是假阳性
+            if not gt_pixel_boxes:
                  max_iou = 0.0
             else:
                 for gt_pixel_box in gt_pixel_boxes:
@@ -169,7 +193,6 @@ def main():
             if max_iou < IOU_THRESHOLD:
                 false_positives.append((yolo_data["confidence"], yolo_pixel_box))
 
-        # 按置信度排序，选择得分最高的K个
         false_positives.sort(key=lambda x: x[0], reverse=True)
         
         for i, (conf, (x1, y1, x2, y2)) in enumerate(false_positives[:K_NEGATIVE_PATCHES]):
@@ -190,7 +213,6 @@ def main():
     print(f"阳性 patches保存在: {POSITIVE_PATCH_DIR}")
     print(f"阴性 patches保存在: {NEGATIVE_PATCH_DIR}")
 
-
-# --- 5. 运行脚本 ---
+# --- 6. 运行脚本 ---
 if __name__ == "__main__":
     main()
