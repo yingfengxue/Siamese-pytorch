@@ -4,6 +4,8 @@ import os
 import glob
 
 # --- 1. 配置您的路径和参数 ---
+VIEW = 'cc'      
+SPLIT = 'test'
 
 # --- 调整K值 (每张图像保留的阴性样本数) ---
 K_NEGATIVE_PATCHES = 5 
