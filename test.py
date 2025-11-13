@@ -142,6 +142,56 @@ def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.5):
     total_fn = 0
 
     for match_key, prediction_data in final_predictions.items():
+        cc_prop_info = prediction_data['final_cc_proposal']
+
+        # 如果该患者没有任何被选中的 proposal
+        if cc_prop_info is None:
+            # 尝试加载所有 GT，统计为 FN
+            original_base_name = "_".join(match_key.split('_'))
+            cc_gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', original_base_name + '.txt')
+            gt_boxes_data = load_boxes_from_file(cc_gt_path)
+            total_fn += len(gt_boxes_data)  # 所有 GT 都算作 FN
+            continue
+
+        predicted_box_coords = prediction_data.get('predicted_box_coords')
+        predicted_class_id = prediction_data['predicted_class']
+        is_mass_prediction = predicted_class_id < 3
+
+        original_base_name = "_".join(cc_prop_info['filename'].split('_')[:3])
+        cc_gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', original_base_name + '.txt')
+        gt_boxes_data = load_boxes_from_file(cc_gt_path)
+        has_ground_truth = len(gt_boxes_data) > 0
+
+        is_true_positive = False
+        if is_mass_prediction and has_ground_truth and predicted_box_coords is not None:
+            pred_box = yolo_to_norm_corners(predicted_box_coords)
+            for gt_box_with_class in gt_boxes_data:
+                gt_box = yolo_to_norm_corners(gt_box_with_class)
+                if calculate_iou(pred_box, gt_box) >= iou_threshold:
+                    is_true_positive = True
+                    break
+
+        # 统计 TP, FP, FN
+        if is_mass_prediction and is_true_positive:
+            total_tp += 1
+        elif is_mass_prediction and not is_true_positive:
+            total_fp += 1
+        elif not is_mass_prediction and has_ground_truth:
+            total_fn += len(gt_boxes_data)  # 遗漏的 GT 全部计为 FN
+
+    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
+    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+    return {'TP': total_tp, 'FP': total_fp, 'FN': total_fn, 'Precision': precision, 'Recall': recall, 'F1_Score': f1_score}
+
+'''
+def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.5):
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+
+    for match_key, prediction_data in final_predictions.items():
         predicted_box_coords = prediction_data.get('predicted_box_coords')
         predicted_class_id = prediction_data['predicted_class']
         is_mass_prediction = predicted_class_id < 3
@@ -173,7 +223,7 @@ def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.5):
     f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
     return {'TP': total_tp, 'FP': total_fp, 'FN': total_fn, 'Precision': precision, 'Recall': recall, 'F1_Score': f1_score}
-
+'''
 # --- 最终运行函数 ---
 def main_test_pipeline(model_path):
     model = CMCNet(num_classes=NUM_CLASSES, pretrained=False)
