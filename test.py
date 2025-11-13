@@ -157,39 +157,41 @@ import numpy as np
 import os
 
 def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
+    """
+    评估函数：计算 TP/FP/FN/Precision/Recall/F1，同时计算 mAP50 和 mAP@[0.5:0.95]
+    final_predictions: dict, 由 FullDetectionPipeline.run_inference 返回
+    gt_base_dir: GT 标签根目录
+    num_classes: 类别数量 (不包括背景)
+    """
     preds_list = []
     gt_list = []
     total_tp = total_fp = total_fn = 0
-
-    # 给每个 match_key 分配唯一整数 ID (map_2d 要求 image_id)
-    match_key2id = {k: idx for idx, k in enumerate(final_predictions.keys())}
 
     for match_key, data in final_predictions.items():
         pred_class = data['predicted_class']
         pred_box = data['predicted_box_coords']
         cc_prop = data['final_cc_proposal']
 
-        image_id = match_key2id[match_key]
-
         # ------------------
-        # Ground Truth
+        # 1. 载入 GT
         # ------------------
         gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', match_key + '_CC.txt')
         gt_boxes = load_boxes_from_file(gt_path)
         for gt in gt_boxes:
             x1, y1, x2, y2 = yolo_to_norm_corners(gt)
-            difficult = 0  # 默认非难例
-            gt_list.append([image_id, gt[0], x1, y1, x2, y2, difficult])
+            difficult = 0  # 可选，可根据实际标注设定
+            # GT shape = [image_id, class_id, x1, y1, x2, y2, difficult] (7列)
+            gt_list.append([match_key, int(gt[0]), x1, y1, x2, y2, difficult])
 
         # ------------------
-        # 预测
+        # 2. 预测
         # ------------------
         if cc_prop is not None and pred_class < 3 and pred_box is not None:
             x1, y1, x2, y2 = yolo_to_norm_corners(pred_box)
-            score = data.get('best_score', 1.0)
-            preds_list.append([image_id, pred_class, x1, y1, x2, y2, score])
+            # Pred shape = [image_id, class_id, x1, y1, x2, y2] (6列)
+            preds_list.append([match_key, int(pred_class), x1, y1, x2, y2])
 
-            # TP/FP/FN 统计
+            # TP/FP/FN 统计 (IoU>=0.5)
             is_tp = any(calculate_iou([x1, y1, x2, y2], yolo_to_norm_corners(gt)) >= 0.5 for gt in gt_boxes)
             if is_tp:
                 total_tp += 1
@@ -199,21 +201,25 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
             total_fn += len(gt_boxes)
 
     # ------------------
-    # Precision / Recall / F1
+    # 3. Precision / Recall / F1
     # ------------------
-    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) else 0
-    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) else 0
-    f1_score = 2*precision*recall/(precision+recall) if (precision+recall) else 0
+    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
+    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
+    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
 
     # ------------------
-    # mAP 计算
+    # 4. mAP 计算
     # ------------------
     preds = np.array(preds_list, dtype=np.float32)
     gts = np.array(gt_list, dtype=np.float32)
 
+    # 构建 mAP 2D 评估器
     metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=False, num_classes=num_classes)
     metric_fn.add(preds, gts)
+
+    # mAP@[0.5:0.95]
     res_all = metric_fn.value(iou_thresholds=np.arange(0.5, 1.0, 0.05))
+    # mAP@0.5
     res50 = metric_fn.value(iou_thresholds=[0.5])
 
     return {
