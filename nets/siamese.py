@@ -31,7 +31,7 @@ class CMCNet(nn.Module):
         # --- C: 分类头 (Classification Head) ---
         # 这是一个共享的FC层，用于两个分支的分类任务
         # 输出 4 (3个 positive 类 + 1个 "背景" 类)
-        self.metric_dropout = nn.Dropout(p=0.5)
+        self.classifier_dropout = nn.Dropout(p=0.5)
         self.classifier_head = nn.Linear(feature_dim, num_classes)
         
         # --- B: 度量网络 (Metric Network Head) ---
