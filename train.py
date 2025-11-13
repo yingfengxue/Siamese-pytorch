@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
     train_data_path = "/kaggle/working/processed_data/train"
     val_data_path   = "/kaggle/working/processed_data/val"
-    input_shape = [64, 64]
+    input_shape = [224, 224]
 
     alpha = 1.0
     beta  = 1.0
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     Epoch = 100
     batch_size = 32
 
-    Init_lr = 1e-2
+    Init_lr = 1e-3
     Min_lr = Init_lr * 0.01
     optimizer_type = "sgd"
     momentum = 0.9
