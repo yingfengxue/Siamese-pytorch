@@ -152,7 +152,7 @@ class FullDetectionPipeline:
 # ---------------------------
 # 评估函数 (包含 mAP50 & mAP@[0.5:0.95])
 # ---------------------------
-'''
+
 def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
     """
     评估函数：计算 TP/FP/FN/TN/Precision/Recall/F1/Accuracy。
@@ -356,7 +356,7 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4, iou_threshol
         'mAP50': mAP50,
         'mAP@[0.5:0.95]': mAP_all
     }
-
+'''
 
 # ---------------------------
 # 主函数
