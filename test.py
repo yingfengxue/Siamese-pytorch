@@ -158,63 +158,107 @@ import os
 
 def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
     """
-    评估函数：计算 TP/FP/FN/Precision/Recall/F1，同时计算 mAP50 和 mAP@[0.5:0.95]
-    final_predictions: dict, 由 FullDetectionPipeline.run_inference 返回
-    gt_base_dir: GT 标签根目录
-    num_classes: 类别数量 (不包括背景)
+    评估函数：计算 TP/FP/FN/Precision/Recall/F1，并为 mAP 收集数据。
     """
     preds_list = []
     gt_list = []
     total_tp = total_fp = total_fn = 0
+    
+    # 假设 num_positive_classes = 3
 
     for match_key, data in final_predictions.items():
         pred_class = data['predicted_class']
-        pred_box = data['predicted_box_coords']
+        pred_box_coords = data['predicted_box_coords']
         cc_prop = data['final_cc_proposal']
-
+        
         # ------------------
-        # 1. 载入 GT
+        # 1. 载入 GT (为 mAP 准备)
         # ------------------
-        gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', match_key + '_CC.txt')
+        # 构造 GT 文件的基础名 (e.g., 0037..._L_CC)
+        gt_base_name = match_key + '_CC' # 假设 match_key 是 ID_SIDE
+        gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', gt_base_name + '.txt')
         gt_boxes = load_boxes_from_file(gt_path)
+        
+        # 将 GT 添加到 gt_list
         for gt in gt_boxes:
             x1, y1, x2, y2 = yolo_to_norm_corners(gt)
-            difficult = 0  # 可选，可根据实际标注设定
             # GT shape = [image_id, class_id, x1, y1, x2, y2, difficult] (7列)
-            gt_list.append([match_key, int(gt[0]), x1, y1, x2, y2, difficult])
+            # image_id 必须是浮点数，但在这里我们将其作为字符串 Key
+            gt_list.append([match_key, int(gt[0]), x1, y1, x2, y2, 0]) # difficult = 0 (不可忽略)
 
         # ------------------
-        # 2. 预测
+        # 2. 预测 (为 mAP 和 TP/FP 准备)
         # ------------------
-        if cc_prop is not None and pred_class < 3 and pred_box is not None:
-            x1, y1, x2, y2 = yolo_to_norm_corners(pred_box)
-            # Pred shape = [image_id, class_id, x1, y1, x2, y2] (6列)
-            preds_list.append([match_key, int(pred_class), x1, y1, x2, y2])
+        if cc_prop is not None and pred_class < 3 and pred_box_coords is not None:
+            # 预测成功，计算 IoU 统计
+            
+            # (A) 为 mAP 准备: [image_id, class_id, conf, x1, y1, x2, y2]
+            x1, y1, x2, y2 = yolo_to_norm_corners(pred_box_coords)
+            
+            # **FIX:** 我们需要一个置信度，使用 match_score 作为置信度 (简化)
+            confidence_score = data['best_score']
+            
+            # Pred shape = [image_id, class_id, confidence, x1, y1, x2, y2] (7列)
+            preds_list.append([match_key, int(pred_class), confidence_score, x1, y1, x2, y2])
 
-            # TP/FP/FN 统计 (IoU>=0.5)
+            # (B) TP/FP/FN 统计 (IoU>=0.5)
             is_tp = any(calculate_iou([x1, y1, x2, y2], yolo_to_norm_corners(gt)) >= 0.5 for gt in gt_boxes)
+            
             if is_tp:
                 total_tp += 1
             else:
                 total_fp += 1
         else:
+            # 没有合格预测，统计为 FN
             total_fn += len(gt_boxes)
 
     # ------------------
-    # 3. Precision / Recall / F1
+    # 3. mAP/数组准备
+    # ------------------
+    # **FIX:** 将字符串 ID 替换为唯一的数字 ID，或将 ID 列从数组中移除
+    # 由于 mAP 评估库通常需要数字 ID，我们进行数字映射。
+    
+    # 映射字符串 image_id 为数字 ID
+    unique_image_ids = list(set([p[0] for p in preds_list] + [g[0] for g in gt_list]))
+    id_map = {id_str: float(i) for i, id_str in enumerate(unique_image_ids)}
+    
+    # 重新构造数组，并将 Image ID 映射为数字
+    # 预测数组: [image_id (float), class_id, confidence, x1, y1, x2, y2] (7列)
+    preds_mapped = []
+    for p in preds_list:
+        preds_mapped.append([id_map[p[0]]] + p[1:3] + p[3:]) 
+        
+    # GT 数组: [image_id (float), class_id, x1, y1, x2, y2, difficult] (7列)
+    gts_mapped = []
+    for g in gt_list:
+        gts_mapped.append([id_map[g[0]]] + g[1:])
+        
+    preds = np.array(preds_mapped, dtype=np.float32)
+    gts = np.array(gts_mapped, dtype=np.float32)
+
+
+    # ------------------
+    # 4. Precision / Recall / F1
     # ------------------
     precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
     recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
     f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
 
     # ------------------
-    # 4. mAP 计算
+    # 5. mAP 计算 (使用 mAP 评估库，假设已安装)
     # ------------------
-    preds = np.array(preds_list, dtype=np.float32)
-    gts = np.array(gt_list, dtype=np.float32)
+    # 确保 MetricBuilder 可用 (这是一个常见的 mAP 库)
+    try:
+        from mean_average_precision import MetricBuilder 
+    except ImportError:
+        return {
+            'TP': total_tp, 'FP': total_fp, 'FN': total_fn, 
+            'Precision': precision, 'Recall': recall, 'F1_Score': f1_score,
+            'mAP_Note': "MetricBuilder not found. Cannot calculate mAP. Please install mean_average_precision"
+        }
 
-    # 构建 mAP 2D 评估器
-    metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=False, num_classes=num_classes)
+    # 评估器需要 num_classes=3 (因为背景类被排除了)
+    metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=False, num_classes=3)
     metric_fn.add(preds, gts)
 
     # mAP@[0.5:0.95]
@@ -223,16 +267,11 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
     res50 = metric_fn.value(iou_thresholds=[0.5])
 
     return {
-        'TP': total_tp,
-        'FP': total_fp,
-        'FN': total_fn,
-        'Precision': precision,
-        'Recall': recall,
-        'F1_Score': f1_score,
+        'TP': total_tp, 'FP': total_fp, 'FN': total_fn, 
+        'Precision': precision, 'Recall': recall, 'F1_Score': f1_score,
         'mAP50': res50['mAP'],
         'mAP@[0.5:0.95]': res_all['mAP']
     }
-
 
 
 # ---------------------------
