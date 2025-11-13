@@ -32,6 +32,7 @@ if __name__ == "__main__":
     
     # --- (!! 关键修改 !!) ---
     # 1. 您的3个 Positive 类别 + 1个 "背景" 类别
+    num_positive_classes = 3
     num_classes = 4 
     
     # 2. 您的新数据路径
@@ -160,8 +161,8 @@ if __name__ == "__main__":
     # train_lines, train_labels, val_lines, val_labels = load_dataset(dataset_path, train_own_data, train_ratio)
     
     # 使用新的 MultiTaskDataset
-    train_dataset = MultiTaskDataset(train_data_path, input_shape, num_classes=num_classes, random=True)
-    val_dataset   = MultiTaskDataset(val_data_path, input_shape, num_classes=num_classes, random=False)
+    train_dataset = MultiTaskDataset(train_data_path, input_shape, num_classes=num_positive_classes, random=True)
+    val_dataset   = MultiTaskDataset(val_data_path, input_shape, num_classes=num_positive_classes, random=False)
     
     num_train = len(train_dataset)
     num_val   = len(val_dataset)
