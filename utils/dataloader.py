@@ -141,7 +141,7 @@ class MultiTaskDataset(Dataset):
         
         # (2) 用于 validation (random=False)
         # (这在 autoaugment_flag=True 时被错误地跳过了)
-        self.resize = Resize(input_shape[0] if input_shape[0] == input_shape[1] else input_shape)
+        self.resize = Resize(input_shape)
         self.center_crop = CenterCrop(input_shape)
 
     def _parse_positive_filename(self, filename):
