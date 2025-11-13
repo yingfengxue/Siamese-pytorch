@@ -99,8 +99,11 @@ class FullDetectionPipeline:
                 boxes = load_boxes_from_file(file_path)
                 # 假设每个 YOLO 预测文件只包含一个主要检测框
                 if boxes:
-                    # 这里的 boxes[0] 是 [class_id, xc, yc, w, h] 列表
-                    yolo_box_map[name_without_ext] = boxes[0][1:5] # 提取 [xc, yc, w, h]
+                yolo_box_map[name_without_ext] = [
+                    {'class': int(b[0]), 'box': b[1:5]} for b in boxes
+                ]
+            else:
+                yolo_box_map[name_without_ext] = []
         return yolo_box_map
 
     def _generate_cross_view_pairs(self):
