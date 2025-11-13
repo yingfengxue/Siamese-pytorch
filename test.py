@@ -152,24 +152,94 @@ class FullDetectionPipeline:
 # ---------------------------
 # 评估函数 (包含 mAP50 & mAP@[0.5:0.95])
 # ---------------------------
-from mean_average_precision import MetricBuilder
-import numpy as np
-import os
+def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.5):
+    """
+    评估函数：计算 TP/FP/FN/TN/Precision/Recall/F1/Accuracy。
+    """
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+    total_tn = 0 # <-- 新增: True Negatives
+    
+    # 假设 num_classes=4 (背景类 ID = 3)
 
-def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
-    # ... (您的所有 TP/FP/FN 统计逻辑保持不变) ...
+    for match_key, prediction_data in final_predictions.items():
+        predicted_box_coords = prediction_data.get('predicted_box_coords')
+        predicted_class_id = prediction_data['predicted_class']
+        is_mass_prediction = predicted_class_id < 3
 
-    # ------------------
-    # 5. 返回基础指标 (跳过 mAP)
-    # ------------------
-    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
-    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
-    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        cc_prop_info = prediction_data['final_cc_proposal']
+
+        # --- 1. GT 检查 (获取 Ground Truth 状态) ---
+        
+        # 构造 GT 路径 (使用 match_key 或 cc_prop_info)
+        if cc_prop_info is None:
+            # 如果没有成功预测 (None)，则从 match_key 获取 GT 文件名
+            original_base_name = "_".join(match_key.split('_')) + '_CC'
+        else:
+            # 如果有成功预测，则从文件名中获取原始名
+            original_base_name = "_".join(cc_prop_info['filename'].split('_')[:3])
+            
+        cc_gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', original_base_name + '.txt')
+        gt_boxes_data = load_boxes_from_file(cc_gt_path)
+        has_ground_truth = len(gt_boxes_data) > 0
+        
+        # --- 2. 预测与统计 ---
+        is_true_positive = False
+        
+        # A. 如果有成功预测，检查 IoU (TP/FP)
+        if cc_prop_info is not None and predicted_box_coords is not None:
+            
+            if is_mass_prediction and has_ground_truth:
+                # 检查 IoU
+                pred_box_norm = yolo_to_norm_corners(predicted_box_coords)
+                for gt_box_with_class in gt_boxes_data:
+                    gt_box_norm = yolo_to_norm_corners(gt_box_with_class)
+                    if calculate_iou(pred_box_norm, gt_box_norm) >= iou_threshold:
+                        is_true_positive = True
+                        break
+            
+            # 统计 TP 和 FP (基于是否是 Mass 预测)
+            if is_mass_prediction and is_true_positive:
+                total_tp += 1
+            elif is_mass_prediction and not is_true_positive:
+                total_fp += 1
+        
+        # B. 统计 FN 和 TN (评估系统的“错失”和“正确拒绝”)
+        
+        # Case 1: False Negative (FN) - 模型说没有，但 GT 说有
+        # 注意: 只有当 TP 没发生，且 GT 存在时，才计入 FN
+        if has_ground_truth and not is_true_positive:
+             total_fn += len(gt_boxes_data) # 遗漏的 GT 全部计为 FN
+            
+        # Case 2: True Negative (TN) - 模型说没有，且 GT 说没有
+        # TN 的统计前提是：系统最终没有预测 Mass，且 GT 文件是空的。
+        # 如果模型没有选出合格的 proposal (cc_prop_info is None)，或者最终预测是背景，且 GT 是空的
+        if not is_mass_prediction and not has_ground_truth:
+             total_tn += 1
+
+
+    # --- 最终指标计算 ---
+    
+    # 确保分母不为零
+    total_detections = total_tp + total_fp
+    total_ground_truth = total_tp + total_fn
+    total_samples = total_tp + total_fp + total_fn + total_tn
+
+    # Precision (查准率)
+    precision = total_tp / total_detections if total_detections > 0 else 0
+    # Recall (查全率)
+    recall = total_tp / total_ground_truth if total_ground_truth > 0 else 0
+    # F1 Score
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    # Accuracy (准确率)
+    accuracy = (total_tp + total_tn) / total_samples if total_samples > 0 else 0
 
     return {
-        'TP': total_tp, 'FP': total_fp, 'FN': total_fn, 
+        'TP': total_tp, 'FP': total_fp, 'FN': total_fn, 'TN': total_tn,
+        'Total_Samples': total_samples,
         'Precision': precision, 'Recall': recall, 'F1_Score': f1_score,
-        'Note': 'mAP calculation skipped'
+        'Accuracy': accuracy # <-- 新增 Accuracy
     }
 
 
