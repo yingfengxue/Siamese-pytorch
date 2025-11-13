@@ -57,7 +57,7 @@ GT_LABEL_DIR = '/kaggle/input/breast/data'
 YOLO_PRED_LABEL_DIR = '/kaggle/input/siamesedata/siameseD'
 INPUT_SHAPE = [224, 224]
 NUM_CLASSES = 4
-CONFIDENCE_THRESHOLD = 0.01
+CONFIDENCE_THRESHOLD = 0.0001
 
 # --- Full Detection Pipeline (保留不变) ---
 class FullDetectionPipeline:
@@ -98,12 +98,8 @@ class FullDetectionPipeline:
                 name_without_ext = os.path.splitext(filename)[0]
                 boxes = load_boxes_from_file(file_path)
                 # 假设每个 YOLO 预测文件只包含一个主要检测框
-                if boxes:
-                    yolo_box_map[name_without_ext] = [
-                        {'class': int(b[0]), 'box': b[1:5]} for b in boxes
-                    ]
-                else:
-                    yolo_box_map[name_without_ext] = []
+                if boxes: # 这里的 boxes[0] 是 [class_id, xc, yc, w, h] 列表 
+                    yolo_box_map[name_without_ext] = boxes[0][1:5] # 提取 [xc, yc, w, h]
         return yolo_box_map
 
     def _generate_cross_view_pairs(self):
@@ -238,7 +234,7 @@ def calculate_map(all_preds_for_map, all_gt_for_map, iou_thresholds):
 
 
 # --- 最终评估函数 (已修正) ---
-def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.01):
+def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.0001):
     total_tp = 0
     total_fp = 0
     total_fn = 0
