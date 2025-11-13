@@ -5,7 +5,8 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from tqdm import tqdm
-
+from nets.siamese import CMCNet
+from utils.utils import cvtColor
 # --- 辅助函数 (已修正 yolo_to_norm_corners) ---
 
 def load_boxes_from_file(filepath):
