@@ -36,7 +36,7 @@ if __name__ == "__main__":
     
     # 2. 您的新数据路径
     train_data_path = "/kaggle/working/processed_data/train"
-    val_data_path   = "/kaggle/working/processed_data/validation"
+    val_data_path   = "/kaggle/working/processed_data/val"
     
     # [cite_start]3. 论文中使用的输入大小 [cite: 199]
     input_shape     = [64, 64]
