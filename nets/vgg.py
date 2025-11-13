@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torchvision.models.utils import load_state_dict_from_url
+from torch.hub import load_state_dict_from_url
 
 
 class VGG(nn.Module):
@@ -67,3 +67,4 @@ def VGG16(pretrained, in_channels, **kwargs):
         state_dict = load_state_dict_from_url("https://download.pytorch.org/models/vgg16-397923af.pth", model_dir="./model_data")
         model.load_state_dict(state_dict)
     return model
+
