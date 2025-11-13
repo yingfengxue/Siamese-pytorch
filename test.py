@@ -150,41 +150,28 @@ class FullDetectionPipeline:
         return results
 
 def calculate_ap(tp_sum, fp_sum, num_gt):
-    """
-    计算单个类别的 Average Precision (AP)。
-    简化实现：基于 11 个插值点或所有点的面积。
-    """
+    """计算单个类别的 Average Precision (AP)"""
     if num_gt == 0:
         return 0.0
 
-    # 累积精度和召回率
     precision = np.divide(tp_sum, (fp_sum + tp_sum))
     recall = np.divide(tp_sum, num_gt)
 
-    # 通过将精度设置为其后续最大值来插值精度 (标准 mAP 做法)
+    # 插值精度
     for i in range(len(precision) - 1, 0, -1):
         precision[i - 1] = np.maximum(precision[i - 1], precision[i])
 
-    # 使用所有数据点计算 AP (类似 COCO 积分)
-    # AP 是 P(R) 曲线下的面积，可以看作召回率变化时的精度加权平均
-    
-    # 查找召回率发生变化的点的索引
+    # 使用召回率变化的点计算 AP (类似 COCO 积分)
     i = np.where(recall[1:] != recall[:-1])[0]
-    
-    # 计算 AP: (R[i+1] - R[i]) * P[i+1]
     ap = np.sum((recall[i + 1] - recall[i]) * precision[i + 1])
     
     return ap
 
-
 def calculate_map(all_preds_for_map, all_gt_for_map, iou_thresholds):
-    """
-    计算 mAP_{0.5:0.95}。
-    """
+    """计算 mAP_{0.5:0.95}"""
     all_ap = []
     
     # 1. 统一整理数据: 将所有预测框展开并按得分排序
-    # 仅考虑 Mass 类 (ID 0, 1, 2)
     predictions = []
     for img_name, preds in all_preds_for_map.items():
         for pred in preds:
@@ -195,10 +182,9 @@ def calculate_map(all_preds_for_map, all_gt_for_map, iou_thresholds):
                 'class': pred['class']
             })
     
-    # 按置信度得分降序排序 (mAP 核心步骤)
     predictions.sort(key=lambda x: x['score'], reverse=True)
     
-    # 2. 计算总 GT 数量 (只考虑 Mass 类)
+    # 2. 计算总 GT 数量
     num_gt_total = sum(len(gt_list) for gt_list in all_gt_for_map.values())
     
     if num_gt_total == 0:
@@ -206,13 +192,8 @@ def calculate_map(all_preds_for_map, all_gt_for_map, iou_thresholds):
 
     # 3. 对每个 IoU 阈值计算 AP
     for iou_thresh in iou_thresholds:
-        
-        # 初始化 TP/FP 标记
         tp = np.zeros(len(predictions))
         fp = np.zeros(len(predictions))
-        
-        # 跟踪哪些 GT 框已经被匹配，避免重复匹配
-        # { img_name: [False, False, ...], ...}
         gt_matched = {name: [False] * len(gts) for name, gts in all_gt_for_map.items()}
 
         for i, pred in enumerate(predictions):
@@ -222,10 +203,11 @@ def calculate_map(all_preds_for_map, all_gt_for_map, iou_thresholds):
             best_iou = 0.0
             best_gt_idx = -1
             
-            # 查找最佳匹配的 GT
+            # 查找最佳匹配的 GT (使用修正后的字典格式)
             if img_name in all_gt_for_map:
-                for j, gt_data in enumerate(all_gt_for_map[img_name]):
-                    gt_box = yolo_to_norm_corners(gt_data['box'])
+                for j, gt_data_dict in enumerate(all_gt_for_map[img_name]):
+                    # 从字典中获取 'box' 坐标列表
+                    gt_box = yolo_to_norm_corners(gt_data_dict['box']) 
                     current_iou = calculate_iou(pred_box, gt_box)
                     
                     if current_iou > best_iou:
@@ -233,17 +215,16 @@ def calculate_map(all_preds_for_map, all_gt_for_map, iou_thresholds):
                         best_gt_idx = j
 
             # 匹配判定
-            if best_iou >= iou_thresh and not gt_matched[img_name][best_gt_idx]:
-                tp[i] = 1.0  # 匹配成功且未被匹配的 GT
+            if best_iou >= iou_thresh and best_gt_idx != -1 and not gt_matched[img_name][best_gt_idx]:
+                tp[i] = 1.0
                 gt_matched[img_name][best_gt_idx] = True
             else:
-                fp[i] = 1.0  # 未匹配到 GT，或 IoU 不足，或匹配到已匹配的 GT
+                fp[i] = 1.0
 
         # 累积 TP/FP
         tp_sum = np.cumsum(tp)
         fp_sum = np.cumsum(fp)
         
-        # 计算 AP 并添加到列表
         ap = calculate_ap(tp_sum, fp_sum, num_gt_total)
         all_ap.append(ap)
 
@@ -251,9 +232,8 @@ def calculate_map(all_preds_for_map, all_gt_for_map, iou_thresholds):
     mean_average_precision = np.mean(all_ap)
     return mean_average_precision
 
-
 # -----------------------------------------------------------
-# --- 最终评估函数 ---
+# --- 最终评估函数 (已修正) ---
 # -----------------------------------------------------------
 
 def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
@@ -278,32 +258,28 @@ def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
         is_mass_prediction = predicted_class_id < 3
 
         cc_prop_info = prediction_data['final_cc_proposal']
-        # **mAP 需要 confidence_score**
         confidence_score = prediction_data.get('confidence_score', 0.0) 
 
         # --- 1. GT 检查 (获取 Ground Truth 状态) ---
         
-        # 构造 GT 路径 (这部分逻辑需要确保 match_key 和 cc_prop_info 的处理是正确的)
+        # 构造 GT 路径 (使用原始逻辑)
         if cc_prop_info is None:
-            # 假设 match_key 格式为 base_name_CC
             original_base_name = "_".join(match_key.split('_')[:-1]) 
         else:
-            # 假设 cc_prop_info['filename'] 格式为 base_name_CC.ext
             original_base_name = "_".join(cc_prop_info['filename'].split('_')[:3])
             
         cc_gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', original_base_name + '.txt')
         gt_boxes_data = load_boxes_from_file(cc_gt_path)
         has_ground_truth = len(gt_boxes_data) > 0
         
-        # 收集 GT 数据 (修正：将列表格式转换为字典格式)
+        # 收集 GT 数据 (修正: 将列表格式转换为字典格式供 mAP 函数使用)
         if original_base_name not in all_gt_for_map:
             converted_gt_list = []
             for gt_data_list in gt_boxes_data:
-                # 确保格式为 [class_id, xc, yc, w, h]
                 if len(gt_data_list) >= 5:
                     converted_gt_list.append({
-                        'box': gt_data_list[1:5],  # 提取 [xc, yc, w, h] (索引 1 到 4)
-                        'class': int(gt_data_list[0])  # 提取 class_id (索引 0)
+                        'box': gt_data_list[1:5],      # [xc, yc, w, h]
+                        'class': int(gt_data_list[0])  # class_id
                     })
             all_gt_for_map[original_base_name] = converted_gt_list
              
@@ -312,11 +288,10 @@ def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
             if original_base_name not in all_preds_for_map:
                 all_preds_for_map[original_base_name] = []
                 
-            # 假设 all_preds_for_map 只需要 mass 类的预测
             all_preds_for_map[original_base_name].append({
                 'box': predicted_box_coords,
                 'score': confidence_score,
-                'class': predicted_class_id # Mass 类 (0, 1, 2)
+                'class': predicted_class_id 
             })
 
         # --- 2. 预测与统计 (原始 TP/FP/FN/TN 逻辑) ---
@@ -326,13 +301,18 @@ def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
         if cc_prop_info is not None and predicted_box_coords is not None:
             
             if is_mass_prediction and has_ground_truth:
-                # 检查 IoU (使用原始 iou_threshold=0.001)
+                # 检查 IoU
                 pred_box_norm = yolo_to_norm_corners(predicted_box_coords)
-                for gt_box_with_class in gt_boxes_data:
-                    gt_box_norm = yolo_to_norm_corners(gt_box_with_class['box']) # 假设 gt_box_with_class['box'] 是坐标
-                    if calculate_iou(pred_box_norm, gt_box_norm) >= iou_threshold:
-                        is_true_positive = True
-                        break
+                
+                # 修正: 使用索引访问 load_boxes_from_file 返回的列表数据
+                for gt_data_list in gt_boxes_data:
+                    if len(gt_data_list) >= 5:
+                        gt_coords = gt_data_list[1:5] # 提取 [xc, yc, w, h]
+                        gt_box_norm = yolo_to_norm_corners(gt_coords)
+                        
+                        if calculate_iou(pred_box_norm, gt_box_norm) >= iou_threshold:
+                            is_true_positive = True
+                            break
             
             # 统计 TP 和 FP
             if is_mass_prediction and is_true_positive:
@@ -341,13 +321,9 @@ def evaluate_results(final_predictions, gt_base_dir, iou_threshold=0.001):
                 total_fp += 1
         
         # B. 统计 FN 和 TN
-        # Case 1: False Negative (FN) - 模型说没有，但 GT 说有
         if has_ground_truth and not is_true_positive:
-             # 如果一个 GT 样本有多个 Mass 框，则所有遗漏的 Mass 框都算作 FN
-             # 注意：原始代码是 total_fn += len(gt_boxes_data)
-             total_fn += len(gt_boxes_data) # 遗漏的 GT 全部计为 FN
+             total_fn += len(gt_boxes_data) 
             
-        # Case 2: True Negative (TN) - 模型说没有，且 GT 说没有
         if not is_mass_prediction and not has_ground_truth:
              total_tn += 1
 
