@@ -57,7 +57,7 @@ GT_LABEL_DIR = '/kaggle/input/breast/data'
 YOLO_PRED_LABEL_DIR = '/kaggle/input/siamesedata/siameseD'
 INPUT_SHAPE = [224, 224]
 NUM_CLASSES = 4
-CONFIDENCE_THRESHOLD = 0.001
+CONFIDENCE_THRESHOLD = 0.01
 
 # --- Full Detection Pipeline (保留不变) ---
 class FullDetectionPipeline:
