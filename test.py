@@ -6,18 +6,17 @@ import torch.nn.functional as F
 from PIL import Image
 from tqdm import tqdm
 
-# 安装 mAP 计算库
-#!pip install mean_average_precision
+# 安装库（只需执行一次）
+# !pip install mean-average-precision
 
-from mean_average_precision import Metric
+from mean_average_precision import MetricBuilder
 
-# --- 导入你的模型 ---
+# --- 导入模型 ---
 from nets.siamese import CMCNet
 from utils.utils import cvtColor
 
 # --- 辅助函数 ---
 def load_boxes_from_file(filepath):
-    """载入 YOLO 标签文件 (class, x, y, w, h)"""
     boxes = []
     if not os.path.exists(filepath):
         return boxes
@@ -29,7 +28,6 @@ def load_boxes_from_file(filepath):
     return boxes
 
 def yolo_to_norm_corners(box):
-    """YOLO [class, x_center, y_center, w, h] -> [x1, y1, x2, y2]"""
     x_center, y_center, w, h = box[1:5]
     x1 = max(0, x_center - w / 2)
     y1 = max(0, y_center - h / 2)
@@ -54,12 +52,12 @@ TEST_PATCH_DIR = '/kaggle/input/siamesedata/siameseD/test'
 GT_LABEL_DIR = '/kaggle/input/breast/data'
 YOLO_PRED_LABEL_DIR = '/kaggle/input/siamesedata/siameseD'
 INPUT_SHAPE = [224, 224]
-NUM_CLASSES = 4  # 3 positive + 1 background
+NUM_CLASSES = 4
 CONFIDENCE_THRESHOLD = 0.5
 
-# -----------------------
+# ---------------------------
 # Full Detection Pipeline
-# -----------------------
+# ---------------------------
 class FullDetectionPipeline:
     def __init__(self, model, gt_base_dir, patch_base_dir, yolo_pred_dir):
         self.net = model.eval()
@@ -98,7 +96,7 @@ class FullDetectionPipeline:
                 name_without_ext = os.path.splitext(filename)[0]
                 boxes = load_boxes_from_file(file_path)
                 if boxes:
-                    yolo_box_map[name_without_ext] = boxes[0]  # 取第一个预测
+                    yolo_box_map[name_without_ext] = boxes[0]
         return yolo_box_map
 
     def _generate_cross_view_pairs(self):
@@ -151,70 +149,56 @@ class FullDetectionPipeline:
         
         return results
 
-# -----------------------
-# mAP 计算 & TP/FP/FN 统计
-# -----------------------
+# ---------------------------
+# 评估函数 (包含 mAP50 & mAP@[0.5:0.95])
+# ---------------------------
 def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
-    total_tp = 0
-    total_fp = 0
-    total_fn = 0
-    
     preds_list = []
     gt_list = []
+    total_tp = total_fp = total_fn = 0
 
-    for match_key, prediction_data in final_predictions.items():
-        predicted_class_id = prediction_data['predicted_class']
-        predicted_box_coords = prediction_data['predicted_box_coords']
-        cc_prop_info = prediction_data['final_cc_proposal']
+    for match_key, data in final_predictions.items():
+        pred_class = data['predicted_class']
+        pred_box = data['predicted_box_coords']
+        cc_prop = data['final_cc_proposal']
 
         # GT
-        original_base_name = match_key + '_CC'
-        cc_gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', original_base_name + '.txt')
-        gt_boxes = load_boxes_from_file(cc_gt_path)
-        for gt_box in gt_boxes:
-            x1, y1, x2, y2 = yolo_to_norm_corners(gt_box)
-            gt_list.append([match_key, gt_box[0], x1, y1, x2, y2])
+        gt_path = os.path.join(gt_base_dir, 'cc_view', 'labels', 'test', match_key + '_CC.txt')
+        gt_boxes = load_boxes_from_file(gt_path)
+        for gt in gt_boxes:
+            x1, y1, x2, y2 = yolo_to_norm_corners(gt)
+            gt_list.append([match_key, gt[0], x1, y1, x2, y2])
 
         # 预测
-        if cc_prop_info is not None and predicted_class_id < 3 and predicted_box_coords is not None:
-            x1, y1, x2, y2 = yolo_to_norm_corners(predicted_box_coords)
-            score = prediction_data.get('best_score', 1.0)
-            preds_list.append([match_key, predicted_class_id, x1, y1, x2, y2, score])
+        if cc_prop is not None and pred_class < 3 and pred_box is not None:
+            x1, y1, x2, y2 = yolo_to_norm_corners(pred_box)
+            score = data.get('best_score', 1.0)
+            preds_list.append([match_key, pred_class, x1, y1, x2, y2, score])
 
-            # TP/FP/FN 统计 (IoU>=0.5)
-            is_true_positive = False
-            for gt_box in gt_boxes:
-                gt_box_norm = yolo_to_norm_corners(gt_box)
-                if calculate_iou([x1,y1,x2,y2], gt_box_norm) >= 0.5:
-                    is_true_positive = True
-                    break
-            if is_true_positive:
+            # TP/FP/FN 统计
+            is_tp = any(calculate_iou([x1, y1, x2, y2], yolo_to_norm_corners(gt)) >= 0.5 for gt in gt_boxes)
+            if is_tp:
                 total_tp += 1
             else:
                 total_fp += 1
         else:
             total_fn += len(gt_boxes)
 
-    # TP/FP/FN -> Precision/Recall/F1
-    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
-    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
-    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    # Precision / Recall / F1
+    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) else 0
+    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) else 0
+    f1_score = 2*precision*recall/(precision+recall) if (precision+recall) else 0
 
-    # -----------------------
+    # -------------------
     # mAP 计算
-    # -----------------------
+    # -------------------
     preds = np.array(preds_list)
     gts = np.array(gt_list)
 
-    # mAP@[0.5:0.95]
-    metric_all = Metric(num_classes=num_classes, iou_thresholds=np.arange(0.5, 1.0, 0.05))
-    metric_all.update(preds, gts)
-    map_results_all = metric_all.compute()
-
-    # mAP@0.5
-    metric50 = Metric(num_classes=num_classes, iou_thresholds=[0.5])
-    metric50.update(preds, gts)
-    map50_results = metric50.compute()
+    metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=False, num_classes=num_classes)
+    metric_fn.add(preds, gts)
+    res_all = metric_fn.value(iou_thresholds=np.arange(0.5, 1.0, 0.05))
+    res50 = metric_fn.value(iou_thresholds=[0.5])
 
     return {
         'TP': total_tp,
@@ -223,16 +207,16 @@ def evaluate_results(final_predictions, gt_base_dir, num_classes=4):
         'Precision': precision,
         'Recall': recall,
         'F1_Score': f1_score,
-        'mAP50': map50_results,
-        'mAP@[0.5:0.95]': map_results_all
+        'mAP50': res50['mAP'],
+        'mAP@[0.5:0.95]': res_all['mAP']
     }
 
-# -----------------------
-# 运行函数
-# -----------------------
+# ---------------------------
+# 主函数
+# ---------------------------
 def main_test_pipeline(model_path):
-    model = CMCNet(num_classes=NUM_CLASSES, pretrained=False)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = CMCNet(num_classes=NUM_CLASSES, pretrained=False)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
 
